@@ -1,16 +1,15 @@
-# -*-coding:utf-8-*-
-
 import tensorflow as tf
-import utils
 import math
 import os
 import numpy as np
 from sklearn.cluster import KMeans
-import drnn
-import rnn_cell_extensions
-import util.augmentation as aug
-from tsnes import tsne, middle_tsne
 import warnings
+
+import dtcc_tensorflow.drnn as drnn
+import dtcc_tensorflow.rnn_cell_extensions as rnn_cell_extensions
+import dtcc_tensorflow.utils.general as utils
+import dtcc_tensorflow.utils.augmentation as aug
+from dtcc_tensorflow.utils.tsnes import tsne, middle_tsne
 warnings.filterwarnings("ignore", category=Warning)
 
 class Config(object):

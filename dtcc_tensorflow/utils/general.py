@@ -6,12 +6,8 @@ Created on Thu Sep  8 15:29:48 2016
 """
 import tensorflow as tf
 import numpy as np
-import sys, time
 from scipy.special import comb
 from sklearn import metrics
-import copy
-import matplotlib.pyplot as plt
-from sklearn.decomposition import TruncatedSVD
 from scipy.special import comb
 from sklearn.metrics.cluster import normalized_mutual_info_score
 from sklearn.cluster import KMeans

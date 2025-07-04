@@ -28,7 +28,7 @@ def write_version_to_init(version, init_file):
 package_info = load_package_json('package.json')
 
 # Write version to __init__.py
-init_file_path = os.path.join(package_info.get('name'), '__init__.py')
+init_file_path = os.path.join(package_info.get('name').replace('-', '_'), '__init__.py')
 write_version_to_init(package_info.get('version'), init_file_path)
 
 setup(
