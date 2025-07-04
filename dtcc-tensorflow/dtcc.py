@@ -465,17 +465,8 @@ def run_model(dataset,train_data,train_label, config):
 
 
 
-def main():
+def run_dtcc(train_name, test_name, dataset_name):
     config = Config()
-    # input your filename
-    dataset_name='Meat'
-
-
-    '''dataset setting'''
-    train_name ='./UCRArchive_2018/{0}/{0}_TRAIN.tsv'.format(dataset_name)  # re-config the path
-    test_name ='./UCRArchive_2018/{0}/{0}_TEST.tsv'.format(dataset_name)  # re-config the path
-
-
 
     train_data, train_label = utils.load_data(train_name)
     test_data,test_label=utils.load_data(test_name)
@@ -510,4 +501,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    '''dataset setting'''
+    dataset_name='Meat'
+    train_name ='../data/UCRArchive_2018/{0}/{0}_TRAIN.tsv'.format(dataset_name)  # re-config the path
+    test_name ='../data/UCRArchive_2018/{0}/{0}_TEST.tsv'.format(dataset_name)  # re-config the path
+    run_dtcc()
