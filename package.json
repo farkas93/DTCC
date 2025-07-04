@@ -1,0 +1,8 @@
+{
+    "name": "dtcc-tensorflow",
+    "version": "0.0.1",
+    "author": "Zsombor Kalotay",
+    "author_email": "zsombor.kalotay@cereneo.ch",
+    "description": "An implementation of the Deep Temporal Contrastive Clusterer by Ying Zhong, Dong Huang and Chang-Dong Wang",
+    "url":"https://github.com/farkas93/DTCC"
+}

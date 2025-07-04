@@ -3,16 +3,13 @@
 import tensorflow as tf
 import utils
 import math
-import sys
 import os
 import numpy as np
 from sklearn.cluster import KMeans
-import copy
-import drnn
 import drnn
 import rnn_cell_extensions
 import util.augmentation as aug
-from tsnes import tsne,middle_tsne
+from tsnes import tsne, middle_tsne
 import warnings
 warnings.filterwarnings("ignore", category=Warning)
 
