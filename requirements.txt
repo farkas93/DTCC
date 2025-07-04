@@ -1,3 +1,4 @@
 tensorflow[and-cuda]
+tensorflow-addons
 numpy
 scipy

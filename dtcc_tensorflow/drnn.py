@@ -43,9 +43,9 @@ def dRNN(cell, inputs, rate, scope='default'):
     dilated_inputs = [tf.concat(inputs[i * rate:(i + 1) * rate],
                                 axis=0) for i in range(dialated_n_steps)]#[x1; x2],dilated_inputs=list:286----tensor(28,1)
     # building a dialated RNN with reformated (dilated) inputs
-    dilated_outputs, _ = tf.contrib.rnn.static_rnn(
-        cell, dilated_inputs,
-        dtype=tf.float32, scope=scope)#dilated_outputs=list:286----------tensor(28,100)
+    rnn_layer = tf.keras.layers.RNN(cell, return_sequences=True)
+    dilated_outputs = rnn_layer(tf.stack(dilated_inputs, axis=1))
+    dilated_outputs = tf.unstack(dilated_outputs, axis=1)#dilated_outputs=list:286----------tensor(28,100)
     # reshape output back to the input format as a list of tensors with shape [batch_size, input_dims]
     # split each element of the outputs from size [batch_size*rate, input_dims] to 
     # [[batch_size, input_dims], [batch_size, input_dims], ...] with length = rate
@@ -97,11 +97,11 @@ def _contruct_cells(hidden_structs, cell_type):
     cells = []
     for hidden_dims in hidden_structs:
         if cell_type == "RNN":
-            cell = tf.contrib.rnn.BasicRNNCell(hidden_dims)
+            cell = tf.keras.layers.SimpleRNNCell(hidden_dims)
         elif cell_type == "LSTM":
-            cell = tf.contrib.rnn.BasicLSTMCell(hidden_dims)
+            cell = tf.keras.layers.LSTMCell(hidden_dims)
         elif cell_type == "GRU":
-            cell = tf.contrib.rnn.GRUCell(hidden_dims)
+            cell = tf.keras.layers.GRUCell(hidden_dims)
         cells.append(cell)
 
     return cells#list:3---GRUCell
@@ -157,5 +157,3 @@ def drnn_layer_final(x,
     outputs, output = multi_dRNN_with_dilations(cells, x_reformat, dilations)#output:[(28,286,100),(28,286,50),(28,286,50)]
 
     return outputs, output#outputs:[286][286][286]---286[tensor(28,100)],286[(28,50)],286[(28,50)]
-
-

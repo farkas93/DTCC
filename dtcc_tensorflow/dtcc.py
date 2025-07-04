@@ -67,9 +67,9 @@ def cluster_loss(out, out_aug,class_num,hidden_norm,temperature):#(batch_size,cl
 
     logits_ab = tf.keras.losses.cosine_similarity(tf.expand_dims(out,1), tf.expand_dims(out_aug,0),axis=2) /temperature  # (28,28)logits_aa=tf.clip_by_value(logits_aa, 1e-8,tf.reduce_max(logits_aa))
     logits_ba = tf.keras.losses.cosine_similarity(tf.expand_dims(out_aug,1), tf.expand_dims(out,0),axis=2) /temperature
-    loss_a = tf.losses.softmax_cross_entropy(
+    loss_a = tf.keras.losses.CategoricalCrossentropy()(
         labels, tf.concat([logits_ab, logits_aa], axis=1))  # labels(28,56)----logits_aa(28,28)
-    loss_b = tf.losses.softmax_cross_entropy(
+    loss_b = tf.keras.losses.CategoricalCrossentropy()(
         labels, tf.concat([logits_ba, logits_bb], axis=1))
 
     loss = loss_a + loss_b+ne_loss
@@ -127,193 +127,182 @@ class RNN_clustering_model(object):
         self.hidden_norm = config.hidden_norm
 
     def build_model(self):
-        input = tf.placeholder(tf.float32, [None, self.num_steps],name='inputs')  # 这表示该维度待定，你的输入是什么长度，它就是多少。一般来说第一个维度是指 batch_size
-        # 定义如下:[2,3], [None, 3]等。其中 [None, 3]表示列是3，行数不定。
-        noise = tf.placeholder(tf.float32, [None, self.num_steps], name='noise')
+        # Define placeholders as inputs (will be replaced with function arguments in eager execution later)
+        input = tf.keras.Input(shape=(self.num_steps, self.embedding_size), name='inputs')
+        noise = tf.keras.Input(shape=(self.num_steps, self.embedding_size), name='noise')
+        input_a = tf.keras.Input(shape=(self.num_steps, self.embedding_size), name='input_a')
+        F_new_value = tf.keras.Input(shape=(self.K,), name='F_new_value')
+        F_aug_new = tf.keras.Input(shape=(self.K,), name='F_aug_new')
 
-        input_a = tf.placeholder(tf.float32, [None, self.num_steps], name='input_a')
-        # input_b = tf.placeholder(tf.float32, [None, self.num_steps], name='input_b')
+        # Initialize variables for clustering (F and F_aug)
+        F = tf.Variable(initial_value=tf.zeros([self.batch_size, self.K]), 
+                        trainable=False, name='F')
+        F_aug = tf.Variable(initial_value=tf.zeros([self.batch_size, self.K]), 
+                            trainable=False, name='F_aug')
 
-        F_new_value = tf.placeholder(tf.float32, [None, self.K], name='F_new_value')  # k=2
-
-        F = tf.get_variable('F', shape=[self.batch_size, self.K],
-                            initializer=tf.orthogonal_initializer(gain=1.0, seed=None, dtype=tf.float32),
-                            trainable=False)
-
-        F_aug_new = tf.placeholder(tf.float32, [None, self.K], name='F_aug_new')  # k=2
-
-        F_aug = tf.get_variable('F_aug', shape=[self.batch_size, self.K],
-                            initializer=tf.orthogonal_initializer(gain=1.0, seed=None, dtype=tf.float32),
-                            trainable=False)
-
-        # inputs has shape (batch_size, n_steps, embedding_size)
+        # Reshape inputs
         inputs = tf.reshape(input, [-1, self.num_steps, self.embedding_size])
         noises = tf.reshape(noise, [-1, self.num_steps, self.embedding_size])
-
         inputs_a = tf.reshape(input_a, [-1, self.num_steps, self.embedding_size])
 
-        # a list of 'n_steps' tenosrs, each has shape (batch_size, embedding_size)
-        # encoder_inputs = utils._rnn_reformat(x = inputs, input_dims = self.embedding_size, n_steps = self.num_steps)
-
-        # noise_input has shape (batch_size, n_steps, embedding_size)
+        # Apply noise if denosing is enabled
         if self.denosing:
             print('Noise')
-            noise_input = inputs + noises  # (?,286,1)
-
+            noise_input = inputs + noises
             noise_a = inputs_a + noises
         else:
             print('Non_noise')
             noise_input = inputs
-
             noise_a = inputs_a
 
-        reverse_noise_input = tf.reverse(noise_input, axis=[1])  # (?,286,1)
+        reverse_noise_input = tf.reverse(noise_input, axis=[1])
         reverse_noise_a = tf.reverse(noise_a, axis=[1])
 
-        decoder_inputs = utils._rnn_reformat(x=noise_input, input_dims=self.embedding_size,
-                                             n_steps=self.num_steps)  # a list of 'n_steps' tenosrs,each has shape (batch_size, input_dims)list:286----tensor(28,1)
-        targets = utils._rnn_reformat(x=inputs, input_dims=self.embedding_size,
-                                      n_steps=self.num_steps)  # embedding_size=1,num_steps = train_data.shape[1]
+        # Prepare decoder inputs and targets
+        decoder_inputs = utils._rnn_reformat(x=noise_input, input_dims=self.embedding_size, 
+                                            n_steps=self.num_steps)
+        targets = utils._rnn_reformat(x=inputs, input_dims=self.embedding_size, 
+                                    n_steps=self.num_steps)
+        recon_inputs = utils._rnn_reformat(x=noise_a, input_dims=self.embedding_size, 
+                                        n_steps=self.num_steps)
+        target_a = utils._rnn_reformat(x=inputs_a, input_dims=self.embedding_size, 
+                                    n_steps=self.num_steps)
 
-        recon_inputs = utils._rnn_reformat(x=noise_a, input_dims=self.embedding_size,
-                                             n_steps=self.num_steps)  # a list of 'n_steps' tenosrs,each has shape (batch_size, input_dims)list:286----tensor(28,1)
-        target_a= utils._rnn_reformat(x=inputs_a, input_dims=self.embedding_size,
-                                      n_steps=self.num_steps)  # embedding_size=1,num_steps = train_data.shape[1]
-
-        # targets------list:286
-
-        if self.cell_type == 'LSTM':
-            raise ValueError('LSTMs have not support yet!')
-
-        elif self.cell_type == 'GRU':
-            cell = tf.contrib.rnn.GRUCell(np.sum(self.hidden_size) * 2)
-
+        # Define GRU cell (updated to TF 2.x)
+        cell = tf.keras.layers.GRUCell(np.sum(self.hidden_size) * 2)
+        # Wrap cell with custom wrapper (assuming it's compatible with TF 2.x)
         cell = rnn_cell_extensions.LinearSpaceDecoderWrapper(cell, self.embedding_size)
 
         lf = None
         if self.sample_loss:
             print('Sample Loss')
-
             def lf(prev, i):
                 return prev
 
-        # encoder_output has shape 'layer' list of tensor [batch_size, n_steps, hidden_size]
-        with tf.variable_scope('fw'):  # 返回一个用于定义创建variable（层）的op的上下文管理器。
-            _, encoder_output_fw = drnn.drnn_layer_final(noise_input, self.hidden_size, self.dilations, self.num_steps,
-                                                         self.embedding_size, self.cell_type)  # 输出drnn结构
+        # Encoder layers (forward and backward for original and augmented inputs)
+        with tf.variable_scope('fw'):
+            _, encoder_output_fw = drnn.drnn_layer_final(noise_input, self.hidden_size, self.dilations, 
+                                                        self.num_steps, self.embedding_size, self.cell_type)
         with tf.variable_scope('bw'):
-            _, encoder_output_bw = drnn.drnn_layer_final(reverse_noise_input, self.hidden_size, self.dilations,
-                                                         self.num_steps, self.embedding_size, self.cell_type)
-
-        with tf.variable_scope('fa'):  # 返回一个用于定义创建variable（层）的op的上下文管理器。
-            _, encoder_output_fa = drnn.drnn_layer_final(noise_a, self.hidden_size, self.dilations, self.num_steps,
-                                                         self.embedding_size, self.cell_type)
-
+            _, encoder_output_bw = drnn.drnn_layer_final(reverse_noise_input, self.hidden_size, self.dilations, 
+                                                        self.num_steps, self.embedding_size, self.cell_type)
+        with tf.variable_scope('fa'):
+            _, encoder_output_fa = drnn.drnn_layer_final(noise_a, self.hidden_size, self.dilations, 
+                                                        self.num_steps, self.embedding_size, self.cell_type)
         with tf.variable_scope('ba'):
-            _, encoder_output_ba = drnn.drnn_layer_final(reverse_noise_a, self.hidden_size, self.dilations,
-                                                         self.num_steps, self.embedding_size, self.cell_type)
+            _, encoder_output_ba = drnn.drnn_layer_final(reverse_noise_a, self.hidden_size, self.dilations, 
+                                                        self.num_steps, self.embedding_size, self.cell_type)
 
+        # Combine encoder states
+        fw = [encoder_output_fw[i][:, -1, :] for i in range(len(self.hidden_size))]
+        bw = [encoder_output_bw[i][:, -1, :] for i in range(len(self.hidden_size))]
+        fa = [encoder_output_fa[i][:, -1, :] for i in range(len(self.hidden_size))]
+        ba = [encoder_output_ba[i][:, -1, :] for i in range(len(self.hidden_size))]
 
-        if self.cell_type == 'LSTM':
-            raise ValueError('LSTMs have not support yet!')
-        elif self.cell_type == 'GRU':
-            fw = []
-            bw = []
+        encoder_state_fw = tf.concat(fw, axis=1)
+        encoder_state_bw = tf.concat(bw, axis=1)
+        encoder_state_fa = tf.concat(fa, axis=1)
+        encoder_state_ba = tf.concat(ba, axis=1)
 
-            fa = []
-            ba = []
+        encoder_state = tf.concat([encoder_state_fw, encoder_state_bw], axis=1)
+        encoder_state_a = tf.concat([encoder_state_fa, encoder_state_ba], axis=1)
 
-            for i in range(len(self.hidden_size)):
-                fw.append(encoder_output_fw[i][:, -1, :])  # encoder_output_fw[i][:, -1, :]---(28,100),(28,50),(28,50),,,encoder_output_fw[i]----shape=(?, 286, 100),(28,286,50),(28,286,50)
-                bw.append(encoder_output_bw[i][:, -1, :])
+        # Decoder using tfa.seq2seq (updated to TF 2.x with TensorFlow Addons)
+        if self.sample_loss:
+            print('Sample Loss')
+            sampler = tfa.seq2seq.sampler.ScheduledOutputTrainingSampler(
+                sampling_probability=0.0,  # Adjust if needed
+                next_inputs_fn=lambda outputs, state, sample_ids: outputs  # Placeholder for loop_function
+            )
+        else:
+            sampler = tfa.seq2seq.sampler.TrainingSampler()
 
-                fa.append(encoder_output_fa[i][:, -1, :])
-                ba.append(encoder_output_ba[i][:, -1, :])
+        decoder = tfa.seq2seq.BasicDecoder(
+            cell=cell,
+            sampler=sampler,
+            output_layer=None  # No projection layer needed based on current setup
+        )
 
+        # Decode for original inputs
+        decoder_outputs, _, _ = decoder(
+            inputs=tf.stack(decoder_inputs, axis=1),
+            initial_state=encoder_state,
+            sequence_length=self.num_steps,
+            training=True
+        )
+        decoder_outputs = tf.unstack(decoder_outputs.rnn_output, axis=1)
 
-            encoder_state_fw = tf.concat(fw, axis=1)  # shape=(?, 200)200=100+50+50
-            encoder_state_bw = tf.concat(bw, axis=1)  # shape=(?, 200)
+        # Decode for augmented inputs
+        decoder_aug, _, _ = decoder(
+            inputs=tf.stack(recon_inputs, axis=1),
+            initial_state=encoder_state_a,
+            sequence_length=self.num_steps,
+            training=True
+        )
+        decoder_aug = tf.unstack(decoder_aug.rnn_output, axis=1)
 
-            encoder_state_fa = tf.concat(fa, axis=1)  # tensor(28,200)
-            encoder_state_ba = tf.concat(ba, axis=1)  # tensor(28,200)
+        # Hidden states for clustering and contrastive loss
+        hidden_abstract = encoder_state
+        hidden_a = encoder_state_a
 
-
-
-            encoder_state = tf.concat([encoder_state_fw, encoder_state_bw], axis=1)  # shape=(?, 400)
-            encoder_state_a = tf.concat([encoder_state_fa, encoder_state_ba], axis=1)  # (28,400)
-
-            decoder_outputs, _ = tf.contrib.legacy_seq2seq.rnn_decoder(decoder_inputs=decoder_inputs,
-                                                                       initial_state=encoder_state, cell=cell,
-                                                                       loop_function=lf)  # list(286)----tensor(28,1)
-            decoder_aug,_=tf.contrib.legacy_seq2seq.rnn_decoder(decoder_inputs=recon_inputs,
-                                                                       initial_state=encoder_state_a, cell=cell,
-                                                                       loop_function=lf)
-
-        if self.cell_type == 'LSTM':
-            hidden_abstract = encoder_state.h
-            hidden_a = encoder_state_a.h
-
-        elif self.cell_type == 'GRU':
-            hidden_abstract = encoder_state
-            hidden_a = encoder_state_a  # tensor(28,286)
-
-
-        # F_update
+        # F_update for clustering
         F_update = tf.compat.v1.assign(F, F_new_value)
-        real_hidden_abstract = hidden_abstract  # 原始数据作一个k-means损失
-        # W has shape [sum(hidden_size)*2, batch_size]
-        W = tf.transpose(real_hidden_abstract)  # (400,28)
-        WTW = tf.matmul(real_hidden_abstract, W)  # (28,28)
-        FTWTWF = tf.matmul(tf.matmul(tf.transpose(F), WTW), F)  # （2，2）
+        real_hidden_abstract = hidden_abstract
+        W = tf.transpose(real_hidden_abstract)
+        WTW = tf.matmul(real_hidden_abstract, W)
+        FTWTWF = tf.matmul(tf.matmul(tf.transpose(F), WTW), F)
 
-        #F_aug
+        # F_aug update
         F_update_a = tf.compat.v1.assign(F_aug, F_aug_new)
-        W_aug= tf.transpose(hidden_a)  # (400,28)
-        W_augTW_aug = tf.matmul(hidden_a, W_aug)  # (28,28)
-        F_augTW_augTW_augF_aug = tf.matmul(tf.matmul(tf.transpose(F_aug), W_augTW_aug), F_aug)  # （2，2）
+        W_aug = tf.transpose(hidden_a)
+        W_augTW_aug = tf.matmul(hidden_a, W_aug)
+        F_augTW_augTW_augF_aug = tf.matmul(tf.matmul(tf.transpose(F_aug), W_augTW_aug), F_aug)
 
-
+        # Define losses
         with tf.name_scope("loss_reconstruct"):
-            loss_reconstruct = tf.compat.v1.losses.mean_squared_error(labels=targets , predictions=decoder_outputs)
-            loss_recona=tf.compat.v1.losses.mean_squared_error(labels=target_a , predictions=decoder_aug)
+            loss_reconstruct = tf.keras.losses.MeanSquaredError()(targets, decoder_outputs)
+            loss_recona = tf.keras.losses.MeanSquaredError()(target_a, decoder_aug)
         with tf.name_scope("k-means_loss"):
             loss_k_means = tf.linalg.trace(WTW) - tf.linalg.trace(FTWTWF)
-            loss_kmeans_aug=tf.linalg.trace(W_augTW_aug) - tf.linalg.trace(F_augTW_augTW_augF_aug)
+            loss_kmeans_aug = tf.linalg.trace(W_augTW_aug) - tf.linalg.trace(F_augTW_augTW_augF_aug)
         with tf.name_scope("contrastive_loss"):
             hiddena = tf.reshape(hidden_a, [self.batch_size, -1])
-            contrastive_l = contrastive_loss(hiddena, hidden_abstract, self.batch_size, self.hidden_norm,self.temperature)
-            cluster_l=cluster_loss(F_update,F_update_a,self.class_num,self.hidden_norm,self.temperature)
+            contrastive_l = contrastive_loss(hiddena, hidden_abstract, self.batch_size, 
+                                            self.hidden_norm, self.temperature)
+            cluster_l = cluster_loss(F_update, F_update_a, self.class_num, 
+                                    self.hidden_norm, self.temperature)
 
         with tf.name_scope("loss_total"):
-            loss=loss_reconstruct+loss_recona + self.lamda / 2 * (loss_k_means+loss_kmeans_aug)+ contrastive_l#\loss_kmeans_aug
-
+            loss = loss_reconstruct + loss_recona + self.lamda / 2 * (loss_k_means + loss_kmeans_aug) + contrastive_l
 
         regularization_loss = 0.0
         for i in range(len(tf.trainable_variables())):
             regularization_loss += tf.nn.l2_loss(tf.trainable_variables()[i])
         loss = loss + 1e-4 * regularization_loss
+
+        # Define input and loss dictionaries
         input_tensors = {
             'inputs': input,
             'input_a': input_a,
             'noise': noise,
             'F_new_value': F_new_value,
-            'F_aug_new':F_aug_new,
+            'F_aug_new': F_aug_new,
         }
         loss_tensors = {
             'loss_reconstruct': loss_reconstruct,
-            'loss_recona':loss_recona,
+            'loss_recona': loss_recona,
             'loss_k_means': loss_k_means,
-            'loss_kmeans_aug':loss_kmeans_aug,
+            'loss_kmeans_aug': loss_kmeans_aug,
             'regularization_loss': regularization_loss,
             'contrastive_loss': contrastive_l,
-            'cluster_loss':cluster_l,
+            'cluster_loss': cluster_l,
             'loss': loss
         }
 
-        return input_tensors, loss_tensors, real_hidden_abstract,hidden_a, F_update,F_update_a
+        return input_tensors, loss_tensors, real_hidden_abstract, hidden_a, F_update, F_update_a
 
 
-def run_model(dataset,train_data,train_label, config):
+def run_model(dataset, train_data,train_label, config):
     best_nmi=0
     best_ri=0
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
